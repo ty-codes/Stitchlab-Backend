@@ -36,21 +36,12 @@ app.post('/public/users', async (req, res) => {
     firstname: "bolatito",
     lastname: "adeoye",
     secret: "bolinco123",
-    userType: "tailor",
     phoneNumber: "00000000000"
   }
 
-  const subPlaceholder = {
-    email: "danieljohnson@gmail.com",
-    firstname: "daniel",
-    lastname: "johnson",
-    secret: "daniel123",
-    userType: "subscriber",
-    phoneNumber: "00000000000"
-  }
-  const { email, firstname, lastname, secret, userType, phoneNumber } = req.body;
+  const { email, firstname, lastname, secret, phoneNumber } = req.body;
 
-  if (email && firstname && lastname && secret && userType && phoneNumber) {
+  if (email && firstname && lastname && secret && phoneNumber) {
     var randomId = randomString.generate({
       charset: "alphanumeric",
       length: 24,
@@ -63,9 +54,9 @@ app.post('/public/users', async (req, res) => {
       await client.connect();
       const db = client.db(dbName);
       const col = db.collection("users");
-      var emailExists = await col?.findOne({ email: email })
+      var user = await col?.findOne({ email: email })
 
-      if (!emailExists) {
+      if (!user) {
         // Construct a document                                                                                                                                                              
         let newDocument = hash && {
           "id": randomId,
@@ -77,7 +68,6 @@ app.post('/public/users', async (req, res) => {
           firstname: firstname,
           lastname: lastname,
           secret: hash,
-          userType: userType,
           phoneNumber: phoneNumber,
         }
         // res.send(newDocument)
@@ -91,7 +81,7 @@ app.post('/public/users', async (req, res) => {
       }
 
     } catch (err) {
-      console.log(err.stack);
+      console.log(err);
     }
 
     finally {
@@ -101,6 +91,28 @@ app.post('/public/users', async (req, res) => {
   }
   else {
     res.status(400).json({ message: "Incorrect data" })
+  }
+})
+
+// login
+app.delete('/deleteaccount/users/:id', async (req, res) => {
+  var { email, password } = req.body;
+  const tailor = req.params.id;
+  if (email === process.env.ADMIN_USERNAME && password === ADMIN_SECRET) {
+    try {
+      await client.connect();
+      const db = client.db(dbName);
+      const col = db.collection("users");
+
+      tailor ?
+        col?.findOen({ _id: tailor })
+          .then(async (response) => {
+            res.status(200).send(response)
+          })
+        : res.status(400).send({ message: "Cannot find user" })
+    } catch (err) {
+      console.log(err)
+    }
   }
 })
 
@@ -115,19 +127,18 @@ app.post('/public/users/authenticate', async (req, res) => {
       await client.connect();
       const db = client.db(dbName);
       const col = db.collection("users");
-      var emailExists = await col?.findOne({ email: email });
-      if (emailExists) {
-        console.log(emailExists, emailExists._id.toString());
-        const { secret: secrethash } = emailExists;
+      var user = await col?.findOne({ email: email });
+      if (user) {
+        const { secret: secrethash } = user;
         bcrypt.compare(secret, secrethash).then((response) => {
           if (response) {
             const payload = {
-              sub: emailExists?._id?.toString(),
+              sub: user?._id?.toString(),
               iat: new Date().getTime()
             }
 
             const token = jwt.sign(payload, process.env.SECRET_KEY);
-            res.status(200).json({ token })
+            res.status(200).json({ token, user })
           }
           else {
             res.status(400).json({ message: "Invalid credentials" })
@@ -160,7 +171,6 @@ app.get('/users/:tailorId', async (req, res) => {
     const payload = token ? jwt.verify(token, process.env.SECRET_KEY) : null;
     if (!!payload) {
       const decoded = jwtDecode(token);
-      console.log(decoded.sub)
       const tailor = reqId === decoded.sub ? decoded.sub : null;
 
       try {
@@ -172,10 +182,8 @@ app.get('/users/:tailorId', async (req, res) => {
           col?.findOne({ _id: ObjectId(tailor) })
             .then(async (response) => {
               if (response) {
-                console.log(response, 'customers');
                 res.status(200).json({ data: response });
               } else if ((!response)) {
-                console.log(response, "no customers")
                 res.status(200).json({ data: [] });
               }
             })
@@ -210,8 +218,8 @@ app.post('/users/:tailorId/customer', async (req, res) => {
     const [, token] = bearer ? bearer.split(" ") : res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
       ;
     const payload = token ? jwt.verify(token, process.env.SECRET_KEY) : null;
-    const { style, price, firstname, lastname, dateCreated, dateDue, status } = req.body;
-    if (!!payload && firstname && lastname && style && price && dateCreated && dateDue && status) {
+    const { phoneNumber, gender, firstname, lastname, email, address } = req.body;
+    if (!!payload && firstname && lastname && phoneNumber && email && address && gender) {
       const decoded = jwtDecode(token);
       const tailor = reqId === decoded.sub ? decoded.sub : null;
       const customer = {
@@ -227,13 +235,11 @@ app.post('/users/:tailorId/customer', async (req, res) => {
         tailor ? col?.findOne({ _id: ObjectId(tailor) })
           .then(async (response) => {
             if (response && !response.customers) {
-              console.log(response?.customers);
               var customerArray = [];
               customerArray.push(customer);
               const updated = await col?.updateOne({ _id: ObjectId(tailor) }, { $set: { customers: customerArray } })
               updated && res.status(200).send({ message: "Customer list has been updated" })
             } else if (response && response.customers) {
-              console.log(response?.customers);
               var customerArray = response?.customers;
               customerArray.push(customer);
               const updated = await col?.updateOne({ _id: ObjectId(tailor) }, { $set: { customers: customerArray } })
@@ -259,7 +265,6 @@ app.post('/users/:tailorId/customer', async (req, res) => {
     }
   } else {
     res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
-
   }
 
 })
@@ -287,10 +292,8 @@ app.get('/users/:tailorId/customers', async (req, res) => {
           col?.findOne({ _id: ObjectId(tailor) })
             .then(async (response) => {
               if (response.customers) {
-                console.log(response.customers, 'customers');
                 res.status(200).json({ data: response.customers });
               } else if ((!response.customers)) {
-                console.log(response.customers, "no customers")
                 res.status(200).json({ data: [] });
               }
             })
@@ -315,6 +318,9 @@ app.get('/users/:tailorId/customers', async (req, res) => {
 
 })
 
+// delete customer
+
+
 // add customer measurement
 app.post('/users/:tailorId/measurements', async (req, res) => {
   const reqId = req.params.tailorId;
@@ -328,7 +334,6 @@ app.post('/users/:tailorId/measurements', async (req, res) => {
     // const reqBodyCompleted =  arr.every(item => obj.hasOwnProperty(item))
     const { cid, ...others } = req.body;
     if (!!payload && cid) {
-      console.log(cid, "cid");
       const decoded = jwtDecode(token);
       const tailor = reqId === decoded.sub ? decoded.sub : null;
 
@@ -340,21 +345,20 @@ app.post('/users/:tailorId/measurements', async (req, res) => {
         tailor ? col?.findOne({ _id: ObjectId(tailor) })
           .then(async (response) => {
             const cidAavailable = await db?.collection("measurements")?.findOne({ cid: cid });
-            console.log(cidAavailable)
             if (cidAavailable) {
-              const updated = await db?.collection("measurements")?.insertOne({ cid: cid, measurements: measurement});
+              const updated = await db?.collection("measurements")?.insertOne({ cid: cid, measurements: measurement });
 
-              res.status(200).send({data: updated})
+              res.status(200).send({ data: updated })
             } else {
-              res.status(500).send({messge: "Could not add data"})
+              res.status(500).send({ messge: "Could not add data" })
             }
             // !cidAavailable && await db?.collection("measurements")?.insertOne({ cid: cid, measurements: measurement})
-              // : await db?.collection("measurements")?.findOneAndUpdate({cid: cid}, {measurements: measurement})
-// if(cidAavailable) {
-//                 // : await db?.collection("measurements")?.findOneAndUpdate({cid: cid}, {measurements: measurement})
-// } else {
-//   await db?.collection("measurements")?.insertOne({ cid: cid, measurements: measurement})
-// }
+            // : await db?.collection("measurements")?.findOneAndUpdate({cid: cid}, {measurements: measurement})
+            // if(cidAavailable) {
+            //                 // : await db?.collection("measurements")?.findOneAndUpdate({cid: cid}, {measurements: measurement})
+            // } else {
+            //   await db?.collection("measurements")?.insertOne({ cid: cid, measurements: measurement})
+            // }
           })
           .catch(err => {
             res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials.", error: err })
@@ -399,24 +403,21 @@ app.put('/users/:tailorId/measurements', async (req, res) => {
         const db = client.db(dbName);
         const col = db.collection("users");
         const measurement = others.measurements;
-        
+
         tailor ? col?.findOne({ _id: ObjectId(tailor) })
           .then(async (response) => {
             const cidAavailable = await db?.collection("measurements")?.findOne({ cid: cid });
-            console.log(cidAavailable, "vocds", Boolean(cidAavailable))
             if (cidAavailable) {
-          
-              var editedDocument = {...cidAavailable.measurements, ...measurement}
-              console.log(editedDocument)
-              const updated = db?.collection("measurements")?.updateMany({cid: cid},  { $set: { measurements: editedDocument }})
-              res.status(200).send({messge: "Updated successfully"})
-              
+
+              var editedDocument = { ...cidAavailable.measurements, ...measurement }
+              const updated = db?.collection("measurements")?.updateMany({ cid: cid }, { $set: { measurements: editedDocument } })
+              res.status(200).send({ messge: "Updated successfully" })
+
             } else {
-              res.status(500).send({messge: "Could not update data"})
+              res.status(500).send({ messge: "Could not update data" })
             }
           })
           .catch(err => {
-            console.log(err)
             res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials.", error: err })
           })
           : res.status(400).json({ message: "User does not exist" })
@@ -438,12 +439,10 @@ app.put('/users/:tailorId/measurements', async (req, res) => {
 
 })
 
-console.log(new Date().getDate());
-
 // get customer measurements
 app.get('/users/:tailorId/measurements/:customerId', async (req, res) => {
   const reqId = req.params.tailorId;
-const cid = req.params.customerId;
+  const cid = req.params.customerId;
 
   const bearer = req?.headers?.authorization;
 
@@ -462,14 +461,463 @@ const cid = req.params.customerId;
         tailor ? col?.findOne({ _id: ObjectId(tailor) })
           .then(async (response) => {
             const customer = await db?.collection("measurements")?.findOne({ cid: cid });
-            console.log(customer.measurements)
-            res.status(200).send({data: customer.measurements || []})
+            res.status(200).send({ data: customer.measurements || [] })
           })
           .catch(err => {
             res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials.", error: err })
           })
           : res.status(400).json({ message: "User does not exist" })
 
+
+      } catch (err) {
+        res.status(400).json({ message: "Something went wrong" })
+      }
+
+
+    } else {
+      res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+    }
+  } else {
+    res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+  }
+
+})
+
+// add style to catalogue
+app.post('/catalogue/:tailorId', async (req, res) => {
+  const reqId = req.params.tailorId;
+
+  const bearer = req?.headers?.authorization;
+
+  if (bearer) {
+
+    const [, token] = bearer ? bearer.split(" ") : res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." });
+    const payload = token ? jwt.verify(token, process.env.SECRET_KEY) : null;
+    const { style, fabric, name } = req.body;
+    if (!!payload && style && fabric && name) {
+      var randomId = randomString.generate({
+        charset: "alphanumeric",
+        length: 24,
+      });
+      const decoded = jwtDecode(token);
+      const tailor = reqId === decoded.sub ? decoded.sub : null;
+      const unit = {
+        id: randomId,
+        ...req.body
+      }
+
+      try {
+        await client.connect();
+        const db = client.db(dbName);
+        const col = db.collection("users");
+        tailor ? col?.findOne({ _id: ObjectId(tailor) })
+          .then(async (response) => {
+            if (response && !response.catalogue) {
+              var catalogueArray = [];
+              catalogueArray.push(unit);
+              const updated = await col?.updateOne({ _id: ObjectId(tailor) }, { $set: { catalogue: catalogueArray } })
+              updated && res.status(200).send({ message: "Catalogue has been updated" })
+            } else if (response && response.catalogue) {
+              var catalogueArray = response?.catalogue;
+              catalogueArray.push(unit);
+              const updated = await col?.updateOne({ _id: ObjectId(tailor) }, { $set: { catalogue: catalogueArray } })
+              updated && res.status(200).send({ message: "Catalogue has been updated" })
+            } else if ((!response)) {
+              res.status(400).json({ message: "Account doesn't exist." });
+            }
+          })
+          .catch(err => {
+            res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+          })
+          : res.status(400).json({ message: "User does not exist" })
+
+
+      } catch (err) {
+        res.status(400).json({ message: "Something went wrong" })
+      }
+
+
+    } else {
+      res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+    }
+  } else {
+    res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+  }
+
+})
+
+// get catalogue
+app.get('/catalogue/:tailorId', async (req, res) => {
+  const reqId = req.params.tailorId;
+
+  const bearer = req?.headers?.authorization;
+
+  if (bearer) {
+    const [, token] = bearer ? bearer.split(" ") : res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+      ;
+    const payload = token ? jwt.verify(token, process.env.SECRET_KEY) : null;
+    if (!!payload) {
+      const decoded = jwtDecode(token);
+      const tailor = reqId === decoded.sub ? decoded.sub : null;
+
+      try {
+        await client.connect();
+        const db = client.db(dbName);
+        const col = db.collection("users");
+        tailor ?
+          col?.findOne({ _id: ObjectId(tailor) })
+            .then(async (response) => {
+              if (response.catalogue) {
+                res.status(200).json({ data: response.catalogue });
+              } else if ((!response.catalogue)) {
+                res.status(200).json({ data: [] });
+              }
+            })
+            .catch(err => {
+              res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+            })
+          : res.status(400).json({ message: "Invalid credentials" })
+
+      } catch (err) {
+        res.status(400).json({ message: "Something went wrong" })
+      }
+
+
+    } else {
+      res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+    }
+  } else {
+    res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+  }
+
+})
+
+// delete catalogue
+app.delete('/catalogue/:tailorId', async (req, res) => {
+  const reqId = req.params.tailorId;
+
+  const bearer = req?.headers?.authorization;
+
+  if (bearer) {
+    const [, token] = bearer ? bearer.split(" ") : res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+      ;
+    const payload = token ? jwt.verify(token, process.env.SECRET_KEY) : null;
+    const { id } = req.body;
+    if (!!payload && id) {
+      const decoded = jwtDecode(token);
+      const tailor = reqId === decoded.sub ? decoded.sub : null;
+
+      try {
+        await client.connect();
+        const db = client.db(dbName);
+        const col = db.collection("users");
+        tailor ?
+          col?.findOne({ _id: ObjectId(tailor) })
+            .then(async (response) => {
+              if (response.catalogue) {
+                const deleted = await col.updateOne({ _id: ObjectId(tailor) }, { $pull: { catalogue: { id: id } } })
+                res.status(200).json({ data: deleted });
+              } else if ((!response.catalogue)) {
+                res.status(200).json({ data: "Does not exist in catalogue" });
+              }
+            })
+            .catch(err => {
+              res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+            })
+          : res.status(400).json({ message: "Invalid credentials" })
+
+      } catch (err) {
+        res.status(400).json({ message: "Something went wrong" })
+      }
+
+
+    } else {
+      res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+    }
+  } else {
+    res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+  }
+
+})
+
+// add order
+app.post('/orders/:tailorId', async (req, res) => {
+  const reqId = req.params.tailorId;
+
+  const bearer = req?.headers?.authorization;
+
+  if (bearer) {
+    const [, token] = bearer ? bearer.split(" ") : res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+      ;
+    const payload = token ? jwt.verify(token, process.env.SECRET_KEY) : null;
+    // const reqBodyCompleted =  arr.every(item => obj.hasOwnProperty(item))
+    const { cid, dateCreated, dateDue, price, status, style } = req.body;
+    if (!!payload && cid && dateCreated && dateDue && price && status && style) {
+      var randomId = randomString.generate({
+        charset: "alphanumeric",
+        length: 24,
+      });
+      const decoded = jwtDecode(token);
+      const tailor = reqId === decoded.sub ? decoded.sub : null;
+      // style would  be an image link from a catalogue sent from the frontend
+
+      try {
+        await client.connect();
+        const db = client.db(dbName);
+        const col = db.collection("orders");
+        const order = { cid, dateCreated, dateDue, price, status, style };
+        tailor ? col?.findOne({ tailorId: tailor })
+          .then(async (response) => {
+            
+            var orderDocument = {id: randomId, ...order};
+            if (!response) {
+              const p = await col.insertOne({ tailorId: tailor, orders: [] });
+              var orderArray = [];
+              orderArray.push(orderDocument);
+              if (p) {
+                const updated = await col?.updateOne({ tailorId: tailor }, { $set: { orders: orderArray } })
+                updated && res.status(200).send(updated)
+              }
+            } else {
+              var orderArray = response?.orders;
+              orderArray.push(orderDocument);
+              const updated = await col?.updateOne({ tailorId: tailor }, { $set: { orders: orderArray } })
+
+              updated && res.status(200).send(updated)
+
+            }
+
+          })
+          .catch(err => {
+            res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials.", error: err })
+          })
+          : res.status(400).json({ message: "User does not exist" })
+
+
+      } catch (err) {
+        res.status(400).json({ message: "Something went wrong" })
+      }
+
+
+    } else {
+      res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+    }
+  } else {
+    res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+  }
+
+})
+
+// get list of orders
+app.get('/orders/:tailorId', async (req, res) => {
+  const reqId = req.params.tailorId;
+
+  const bearer = req?.headers?.authorization;
+
+  if (bearer) {
+    const [, token] = bearer ? bearer.split(" ") : res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+      ;
+    const payload = token ? jwt.verify(token, process.env.SECRET_KEY) : null;
+    if (!!payload) {
+      const decoded = jwtDecode(token);
+      const tailor = reqId === decoded.sub ? decoded.sub : null;
+
+      try {
+        await client.connect();
+        const db = client.db(dbName);
+        const col = db.collection("orders");
+
+        tailor ?
+          col?.findOne({ tailorId: tailor })
+            .then(async (response) => {
+              if (response && response?.orders) {
+                res.status(200).json({ data: response.orders });
+              } else if ((response && !response?.orders)) {
+                res.status(200).json({ data: [] });
+              } else {
+                res.status(200).json({ data: [] });
+              }
+            })
+            .catch(err => {
+              res.status(401).json({ message: "tUnauthorized. Access is denied due to invalid credentials." })
+            })
+          : res.status(200).json({ data: [], message: "You do not have any orders" })
+
+      } catch (err) {
+        res.status(400).json({ message: "Something went wrong" })
+      }
+
+
+    } else {
+      res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+    }
+  } else {
+    res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+  }
+
+})
+
+// get totaal income
+app.get('/total-income/:tailorId', async (req, res) => {
+  const reqId = req.params.tailorId;
+
+  const bearer = req?.headers?.authorization;
+
+  if (bearer) {
+    const [, token] = bearer ? bearer.split(" ") : res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+      ;
+    const payload = token ? jwt.verify(token, process.env.SECRET_KEY) : null;
+    if (!!payload) {
+      const decoded = jwtDecode(token);
+      const tailor = reqId === decoded.sub ? decoded.sub : null;
+
+      try {
+        await client.connect();
+        const db = client.db(dbName);
+        const col = db.collection("orders");
+
+        tailor ?
+          col?.findOne({ tailorId: tailor })
+            .then(async (response) => {
+              if (response && response?.orders) {
+                const completedOrders = response.orders.filter(order => {
+                  return order.status === "done";
+                });
+                const totalRevenue = completedOrders && completedOrders.reduce((acc, object) => {
+                  return acc + Number(object.price);
+                }, 0);
+                
+                res.status(200).json({ total: totalRevenue });
+              } else if ((response && !response?.orders)) {
+                res.status(200).json({ data: [] });
+              } else {
+                res.status(200).json({ data: [] });
+              }
+            })
+            .catch(err => {
+              res.status(401).json({ message: "tUnauthorized. Access is denied due to invalid credentials." })
+            })
+          : res.status(200).json({ data: [], message: "You do not have any orders" })
+
+      } catch (err) {
+        res.status(400).json({ message: "Something went wrong" })
+      }
+
+
+    } else {
+      res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+    }
+  } else {
+    res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+  }
+
+})
+
+// get outsatnding income
+app.get('/outstanding-income/:tailorId', async (req, res) => {
+  const reqId = req.params.tailorId;
+
+  const bearer = req?.headers?.authorization;
+
+  if (bearer) {
+    const [, token] = bearer ? bearer.split(" ") : res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+      ;
+    const payload = token ? jwt.verify(token, process.env.SECRET_KEY) : null;
+    if (!!payload) {
+      const decoded = jwtDecode(token);
+      const tailor = reqId === decoded.sub ? decoded.sub : null;
+
+      try {
+        await client.connect();
+        const db = client.db(dbName);
+        const col = db.collection("orders");
+
+        tailor ?
+          col?.findOne({ tailorId: tailor })
+            .then(async (response) => {
+              if (response && response?.orders) {
+                const outstandingOrders = response.orders.filter(order => {
+                  return order.status === "pending" || order.status==="not started";
+                });
+                const totalOutstandingRevenue = outstandingOrders && outstandingOrders.reduce((acc, object) => {
+                  return acc + Number(object.price);
+                }, 0);
+                
+                res.status(200).json({ total: totalOutstandingRevenue });
+              } else if ((response && !response?.orders)) {
+                res.status(200).json({ data: [] });
+              } else {
+                res.status(200).json({ data: [] });
+              }
+            })
+            .catch(err => {
+              res.status(401).json({ message: "tUnauthorized. Access is denied due to invalid credentials." })
+            })
+          : res.status(200).json({ data: [], message: "You do not have any orders" })
+
+      } catch (err) {
+        res.status(400).json({ message: "Something went wrong" })
+      }
+
+
+    } else {
+      res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+    }
+  } else {
+    res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+
+  }
+
+})
+
+// set status
+app.put('/status/:tailorId', async (req, res) => {
+  const reqId = req.params.tailorId;
+
+  const bearer = req?.headers?.authorization;
+
+  if (bearer) {
+    const [, token] = bearer ? bearer.split(" ") : res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+      ;
+    const payload = token ? jwt.verify(token, process.env.SECRET_KEY) : null;
+    const { id, newStatus } = req.body;
+    if (!!payload && id && newStatus) {
+      const decoded = jwtDecode(token);
+      const tailor = reqId === decoded.sub ? decoded.sub : null;
+
+      try {
+        await client.connect();
+        const db = client.db(dbName);
+        const col = db.collection("orders");
+        tailor ?
+          col?.findOne({ tailorId: tailor })
+            .then(async (response) => {
+              if (response.orders) {
+                const updated = await col.updateOne({ tailorId: tailor, "orders.id": id }, { $set: { "orders.$.status": newStatus } })
+                res.status(200).json({ data: updated });
+              } else if ((!response.orders)) {
+                res.status(200).json({ data: "Does not exist in orders" });
+              }
+            })
+            .catch(err => {
+              res.status(401).json({ message: "Unauthorized. Access is denied due to invalid credentials." })
+            })
+          : res.status(400).json({ message: "Invalid credentials" })
 
       } catch (err) {
         res.status(400).json({ message: "Something went wrong" })
